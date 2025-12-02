@@ -16,6 +16,8 @@ import app from "./app";
 import http from "http";
 import { Server } from "socket.io";
 import { initSocket } from "./socket";
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './config/swagger';
 
 const server = http.createServer(app);
 
@@ -54,6 +56,21 @@ if (testIo) {
 
 console.log("═══════════════════════════════════════════════════════");
 
+// ═══════════════════════════════════════════════════════════════
+// 📚 Swagger API Documentation Setup
+// ═══════════════════════════════════════════════════════════════
+console.log("📚 [SWAGGER] Setting up API documentation...");
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: "Project Management API Docs",
+  customfavIcon: "/favicon.ico",
+  swaggerOptions: {
+    persistAuthorization: true, // Keeps your JWT token even after page refresh
+  }
+}));
+console.log("✅ [SWAGGER] API documentation configured");
+console.log("═══════════════════════════════════════════════════════");
+
 const MONGO_URI = process.env.MONGO_URI!;
 
 mongoose.set("debug", true); // optional query debug
@@ -74,6 +91,9 @@ mongoose.connect(MONGO_URI)
       console.log(`   → API: http://localhost:${PORT}`);
       console.log(`   → Socket.IO: ✅ Ready for connections`);
       console.log(`   → Health Check: http://localhost:${PORT}/api/health`);
+      console.log(`   → 📚 API Documentation: http://localhost:${PORT}/api-docs`);
+      console.log("═══════════════════════════════════════════════════════");
+      console.log("💡 TIP: Visit /api-docs to test your API endpoints!");
       console.log("═══════════════════════════════════════════════════════");
     });
   })

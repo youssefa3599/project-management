@@ -6,6 +6,7 @@ import {
   Navigate,
   useLocation,
 } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -19,6 +20,17 @@ import NotificationsPage from "./pages/NotificationPage";
 
 import AppNavbar from "./components/AppNavbar";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+
+// ✅ Create QueryClient instance (outside component)
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: 1,
+      staleTime: 5 * 60 * 1000, // 5 minutes
+    },
+  },
+});
 
 /** -------------------------------------
  * Scrolls to top on route change
@@ -167,11 +179,13 @@ function AppRoutes() {
  * ------------------------------------- */
 export default function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <ScrollToTop />
-        <AppRoutes />
-      </Router>
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <Router>
+          <ScrollToTop />
+          <AppRoutes />
+        </Router>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 }

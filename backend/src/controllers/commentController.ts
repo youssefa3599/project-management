@@ -250,3 +250,6 @@ export const getCommentsByTask = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+/* =========================
+   📄 Get Comments with Nested Replies
+   ========================= */

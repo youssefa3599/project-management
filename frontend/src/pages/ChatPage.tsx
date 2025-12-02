@@ -1,25 +1,12 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { connectSocket, disconnectSocket } from "../utils/socket";
 import TaskChatGoals, { ITaskGoal } from "../components/TaskChatGoals";
+import useAddTaskMessage, { IMessage, IUser } from "../hooks/useAddTaskMessage";
 import "./ChatPage.css";
-
-interface IUser {
-  id?: string;
-  _id?: string;
-  name: string;
-  email?: string;
-  role?: "admin" | "editor" | "viewer";
-}
-
-interface IMessage {
-  _id: string;
-  sender: IUser;
-  content: string;
-  createdAt: string;
-}
 
 const getUserId = (u?: IUser | null) => u?._id || u?.id || "";
 
@@ -27,8 +14,8 @@ export default function ChatPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const { user, token } = useAuth();
   const API_URL = import.meta.env.VITE_API_URL;
+  const queryClient = useQueryClient();
 
-  const [messages, setMessages] = useState<IMessage[]>([]);
   const [goals, setGoals] = useState<ITaskGoal[]>([]);
   const [chatMembers, setChatMembers] = useState<IUser[]>([]);
   const [showMembersDropdown, setShowMembersDropdown] = useState(false);
@@ -39,7 +26,10 @@ export default function ChatPage() {
   const [invitingUserId, setInvitingUserId] = useState<string | null>(null);
   const [socketConnected, setSocketConnected] = useState(false);
 
-  // ✅ Mention autocomplete state
+  // Reply state
+  const [replyingTo, setReplyingTo] = useState<IMessage | null>(null);
+
+  // Mention autocomplete state
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [mentionSearch, setMentionSearch] = useState("");
   const [mentionCursorPosition, setMentionCursorPosition] = useState(0);
@@ -49,27 +39,38 @@ export default function ChatPage() {
   const socketRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  
+  // Refs for each message to enable scrolling
+  const messageRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
-  // -----------------------------
-  // Fetch chat messages
-  // -----------------------------
-  useEffect(() => {
-    const fetchMessages = async () => {
-      if (!taskId || !token) return;
-      try {
-        const res = await axios.get(`${API_URL}/api/tasks/${taskId}/chat`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        
-        const fetchedMessages: IMessage[] = res.data?.messages ?? res.data ?? [];
-        console.log(`📥 Fetched ${fetchedMessages.length} messages from server`);
-        setMessages(fetchedMessages);
-      } catch (err) {
-        console.error("❌ Failed to fetch messages:", err);
-      }
-    };
-    fetchMessages();
-  }, [taskId, token, API_URL]);
+  // ✅ REACT QUERY: Fetch messages
+  const { data: messages = [], isLoading: loadingMessages } = useQuery<IMessage[]>({
+    queryKey: ['messages', taskId],
+    queryFn: async () => {
+      if (!taskId || !token) return [];
+      
+      console.log(`📡 Fetching messages for task: ${taskId}`);
+      const res = await axios.get(`${API_URL}/api/tasks/${taskId}/chat`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      
+      const fetchedMessages: IMessage[] = Array.isArray(res.data) 
+        ? res.data 
+        : res.data?.messages || [];
+      
+      console.log(`📥 Fetched ${fetchedMessages.length} messages`);
+      return fetchedMessages;
+    },
+    enabled: !!taskId && !!token,
+    refetchOnWindowFocus: false,
+  });
+
+  // ✅ REACT QUERY: Send message mutation
+  const sendMessageMutation = useAddTaskMessage(
+    taskId!,
+    user!,
+    token!
+  );
 
   // -----------------------------
   // Fetch task members
@@ -114,7 +115,7 @@ export default function ChatPage() {
   }, [taskId, token, API_URL]);
 
   // -----------------------------
-  // Socket setup - ZERO FILTERING
+  // Socket setup
   // -----------------------------
   useEffect(() => {
     if (!token || !taskId) return;
@@ -132,7 +133,6 @@ export default function ChatPage() {
     const onNewTaskMessage = (msg: any) => {
       console.log("📨 [Socket] Received newTaskMessage:", msg._id);
       
-      // ✅ JUST ADD IT - NO CHECKS AT ALL
       const formattedMessage: IMessage = {
         _id: msg._id || `msg-${Date.now()}`,
         sender: typeof msg.sender === 'string' 
@@ -145,10 +145,41 @@ export default function ChatPage() {
             } as IUser,
         content: msg.content,
         createdAt: msg.createdAt || new Date().toISOString(),
+        parentMessage: msg.parentMessage || null,
+        status: 'sent',
       };
       
-      // Just add to state array, that's it
-      setMessages(prev => [...prev, formattedMessage]);
+      // ✅ Update React Query cache
+      queryClient.setQueryData<IMessage[]>(['messages', taskId], (old) => {
+        if (!old) return [formattedMessage];
+        
+        const currentUserId = getUserId(user);
+        const msgSenderId = typeof msg.sender === 'string' 
+          ? msg.sender 
+          : (msg.sender._id || msg.sender.id);
+        
+        // If from current user, replace temp message
+        if (msgSenderId === currentUserId) {
+          const tempMsgIndex = old.findIndex(m => 
+            m._id.startsWith('temp-') && 
+            m.content === formattedMessage.content &&
+            m.status === 'sending'
+          );
+          
+          if (tempMsgIndex !== -1) {
+            return old.map((m, idx) => 
+              idx === tempMsgIndex ? formattedMessage : m
+            );
+          }
+        }
+        
+        // Check if message already exists
+        const exists = old.some(m => m._id === formattedMessage._id);
+        if (exists) return old;
+        
+        // Add new message from other users
+        return [...old, formattedMessage];
+      });
     };
 
     const onDisconnect = (reason: string) => {
@@ -156,7 +187,6 @@ export default function ChatPage() {
       setSocketConnected(false);
     };
 
-    // ✅ Listen for mention notifications
     const onMentionNotification = (data: any) => {
       console.log("📢 Mention notification:", data);
       const shouldNavigate = window.confirm(
@@ -209,10 +239,10 @@ export default function ChatPage() {
       socketRef.current = null;
       setSocketConnected(false);
     };
-  }, [token, taskId, API_URL]);
+  }, [token, taskId, API_URL, user, queryClient]);
 
   // -----------------------------
-  // ✅ Handle mention autocomplete
+  // Handle mention autocomplete
   // -----------------------------
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -246,30 +276,29 @@ export default function ChatPage() {
   };
 
   // -----------------------------
-  // ✅ Handle mention selection
+  // Handle mention selection
   // -----------------------------
   const insertMention = (member: IUser) => {
-  const beforeMention = newMessage.slice(0, mentionCursorPosition);
-  const afterMention = newMessage.slice(mentionCursorPosition + mentionSearch.length + 1);
-  
-  // 🔥 FIX: Wrap names with spaces in quotes
-  const mentionText = member.name.includes(' ') 
-    ? `@"${member.name}"` 
-    : `@${member.name}`;
-  
-  const newText = `${beforeMention}${mentionText} ${afterMention}`;
-  setNewMessage(newText);
-  setShowMentionDropdown(false);
-  
-  setTimeout(() => {
-    inputRef.current?.focus();
-    const newCursorPos = beforeMention.length + mentionText.length + 1;
-    inputRef.current?.setSelectionRange(newCursorPos, newCursorPos);
-  }, 0);
-};
+    const beforeMention = newMessage.slice(0, mentionCursorPosition);
+    const afterMention = newMessage.slice(mentionCursorPosition + mentionSearch.length + 1);
+    
+    const mentionText = member.name.includes(' ') 
+      ? `@"${member.name}"` 
+      : `@${member.name}`;
+    
+    const newText = `${beforeMention}${mentionText} ${afterMention}`;
+    setNewMessage(newText);
+    setShowMentionDropdown(false);
+    
+    setTimeout(() => {
+      inputRef.current?.focus();
+      const newCursorPos = beforeMention.length + mentionText.length + 1;
+      inputRef.current?.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  };
 
   // -----------------------------
-  // ✅ Handle keyboard navigation for mentions
+  // Handle keyboard navigation for mentions
   // -----------------------------
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (showMentionDropdown) {
@@ -293,10 +322,10 @@ export default function ChatPage() {
   };
 
   // -----------------------------
-  // ✅ Render message with highlighted mentions
+  // Render message with highlighted mentions
   // -----------------------------
   const renderMessageContent = (content: string) => {
-    const mentionRegex = /@(\w+)/g;
+    const mentionRegex = /@"([^"]+)"|@(\w+)/g;
     const parts = [];
     let lastIndex = 0;
     let match;
@@ -310,7 +339,7 @@ export default function ChatPage() {
         );
       }
 
-      const mentionedName = match[1];
+      const mentionedName = match[1] || match[2];
       const isMentioningMe = mentionedName.toLowerCase() === user?.name?.toLowerCase();
       
       parts.push(
@@ -343,29 +372,64 @@ export default function ChatPage() {
   };
 
   // -----------------------------
-  // Send message - NO TEMP MESSAGE LOGIC
+  // Handle reply
+  // -----------------------------
+  const handleReply = (message: IMessage) => {
+    setReplyingTo(message);
+    inputRef.current?.focus();
+  };
+
+  const cancelReply = () => {
+    setReplyingTo(null);
+  };
+
+  // -----------------------------
+  // Scroll to quoted message
+  // -----------------------------
+  const scrollToMessage = (messageId: string) => {
+    const messageElement = messageRefs.current[messageId];
+    if (messageElement) {
+      messageElement.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'center' 
+      });
+      
+      messageElement.classList.add('message-highlight');
+      setTimeout(() => {
+        messageElement.classList.remove('message-highlight');
+      }, 2000);
+    }
+  };
+
+  // ✅ REACT QUERY: Retry failed message
+  const retryMessage = (failedMsg: IMessage) => {
+    console.log("🔄 Retrying message:", failedMsg._id);
+    
+    sendMessageMutation.mutate({
+      content: failedMsg.content,
+      parentMessageId: failedMsg.parentMessage?._id || null,
+    });
+  };
+
+  // -----------------------------
+  // ✅ REACT QUERY: Send message (much simpler now!)
   // -----------------------------
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !taskId || !token) return;
+    if (!newMessage.trim() || !taskId || !token || !user) return;
 
-    const payload = { content: newMessage.trim() };
+    const content = newMessage.trim();
+    const parentMessageId = replyingTo?._id || null;
+
+    // Clear input immediately (optimistic!)
     setNewMessage("");
+    setReplyingTo(null);
 
-    try {
-      await axios.post(
-        `${API_URL}/api/tasks/${taskId}/chat`,
-        payload,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      // That's it. Socket will handle adding the message to UI
-      console.log("✅ Message sent");
-      
-    } catch (err) {
-      console.error("❌ Failed to send:", err);
-      alert("Failed to send message");
-    }
+    // ✅ React Query handles everything: optimistic update, rollback, success
+    sendMessageMutation.mutate({
+      content,
+      parentMessageId,
+    });
   };
 
   // -----------------------------
@@ -505,7 +569,9 @@ export default function ChatPage() {
       />
 
       <div className="messages-container">
-        {messages.length === 0 ? (
+        {loadingMessages ? (
+          <div className="loading">Loading messages...</div>
+        ) : messages.length === 0 ? (
           <div className="no-messages">
             No messages yet. Type @ to mention someone!
           </div>
@@ -516,13 +582,62 @@ export default function ChatPage() {
             const isOwn = senderUserId === currentUserId;
             
             return (
-              <div key={msg._id} className={`message ${isOwn ? "own" : "other"}`}>
-                <div className="sender-name">{msg.sender?.name}</div>
+              <div 
+                key={msg._id} 
+                className={`message ${isOwn ? "own" : "other"} ${msg.status === 'failed' ? 'failed' : ''}`}
+                ref={(el) => messageRefs.current[msg._id] = el}
+              >
+                {msg.parentMessage && (
+                  <div 
+                    className="quoted-message"
+                    onClick={() => scrollToMessage(msg.parentMessage!._id)}
+                    title="Click to jump to original message"
+                  >
+                    <div className="quoted-message-bar"></div>
+                    <div className="quoted-message-content">
+                      <div className="quoted-message-author">
+                        {msg.parentMessage.sender?.name}
+                      </div>
+                      <div className="quoted-message-text">
+                        {msg.parentMessage.content}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="message-header">
+                  <span className="sender-name">{msg.sender?.name}</span>
+                  <button 
+                    className="reply-btn"
+                    onClick={() => handleReply(msg)}
+                    title="Reply to this message"
+                  >
+                    ↩️
+                  </button>
+                </div>
+                
                 <div className="message-content">
                   {renderMessageContent(msg.content)}
                 </div>
+                
                 <div className="message-time">
                   {new Date(msg.createdAt).toLocaleTimeString()}
+                  
+                  {/* ✅ OPTIMISTIC: Show status indicators */}
+                  {msg.status === 'sending' && (
+                    <span className="message-status sending" title="Sending...">
+                      ⏳
+                    </span>
+                  )}
+                  {msg.status === 'failed' && (
+                    <button 
+                      className="retry-btn"
+                      onClick={() => retryMessage(msg)}
+                      title="Failed to send. Click to retry."
+                    >
+                      ⚠️ Retry
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -532,6 +647,22 @@ export default function ChatPage() {
       </div>
 
       <form className="message-form" onSubmit={handleSendMessage}>
+        {replyingTo && (
+          <div className="replying-banner">
+            <div className="replying-info">
+              <span className="replying-label">Replying to {replyingTo.sender?.name}</span>
+              <span className="replying-preview">{replyingTo.content}</span>
+            </div>
+            <button 
+              type="button" 
+              className="cancel-reply-btn"
+              onClick={cancelReply}
+            >
+              ✖
+            </button>
+          </div>
+        )}
+        
         <div className="message-input-wrapper">
           <input
             ref={inputRef}
@@ -540,7 +671,7 @@ export default function ChatPage() {
             value={newMessage}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            disabled={!socketConnected}
+            disabled={!socketConnected || sendMessageMutation.isPending}
           />
           
           {showMentionDropdown && (
@@ -562,8 +693,11 @@ export default function ChatPage() {
           )}
         </div>
         
-        <button type="submit" disabled={!socketConnected}>
-          {socketConnected ? "Send" : "Connecting..."}
+        <button 
+          type="submit" 
+          disabled={!socketConnected || sendMessageMutation.isPending}
+        >
+          {sendMessageMutation.isPending ? "Sending..." : socketConnected ? "Send" : "Connecting..."}
         </button>
       </form>
 

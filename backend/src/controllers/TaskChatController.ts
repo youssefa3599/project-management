@@ -153,7 +153,7 @@ export const inviteMemberToTaskChat = async (req: RequestWithUser, res: Response
 };
 
 // =====================
-// Accept invite - FIXED (No project access + Emit member joined)
+// Accept invite
 // =====================
 export const acceptTaskChatInvite = async (req: RequestWithUser, res: Response) => {
   console.log("\n\n═══════════════════════════════════════════════════════");
@@ -194,7 +194,7 @@ export const acceptTaskChatInvite = async (req: RequestWithUser, res: Response) 
       console.log("ℹ️ User already in chat members");
     }
 
-    // ✅ 2. Add user to TASK.MEMBERS (NOT project)
+    // ✅ 2. Add user to TASK.MEMBERS
     const taskId = chat.taskId ? chat.taskId.toString() : undefined;
     if (!taskId) {
       console.log("⚠️ Chat has no linked taskId");
@@ -221,11 +221,9 @@ export const acceptTaskChatInvite = async (req: RequestWithUser, res: Response) 
 
     // ✅ 3. Emit events
     try {
-      // Emit to the user who accepted
       io.to(userId).emit("taskInviteAccepted", { chatId, userId, taskId });
       console.log("✅ [SOCKET] taskInviteAccepted emitted to user");
       
-      // ✅ Emit to task room so everyone sees new member
       if (taskId) {
         const taskRoom = `task_${taskId}`;
         io.to(taskRoom).emit("memberJoinedTaskChat", { userId, taskId });
@@ -416,7 +414,10 @@ export const updateTaskGoalStatus = async (
 };
 
 // =============================
-// GET TASK MESSAGES
+// GET TASK MESSAGES - FIXED ✅
+// =============================
+// =============================
+// GET TASK MESSAGES - FIXED ✅
 // =============================
 export const getTaskMessages = async (
   req: RequestWithUser,
@@ -428,7 +429,9 @@ export const getTaskMessages = async (
   try {
     const { id: taskId } = req.params;
 
-    let chat = await Chat.findOne({ taskId }).populate("messages.sender", "name email");
+    // ✅ Remove .lean() to keep consistent Document type
+    let chat = await Chat.findOne({ taskId })
+      .populate("messages.sender", "name email");
 
     if (!chat) {
       console.log("⚠ No chat found → creating");
@@ -444,18 +447,48 @@ export const getTaskMessages = async (
         createdBy: req.user?.id || task.createdBy,
         messages: [],
       });
+      
+      console.log("✅ Created new chat");
+      return res.status(200).json({ success: true, messages: [] });
     }
 
-    console.log(`✅ Returning ${chat.messages?.length || 0} messages`);
-    return res.status(200).json(chat.messages || []);
+    // ✅ Manually populate parentMessage for each message
+    const populatedMessages = (chat.messages || []).map((msg: any) => {
+      if (msg.parentMessage) {
+        // Find parent message in the same messages array
+        const parentMsg = chat!.messages.find(
+          (m: any) => m._id.toString() === msg.parentMessage.toString()
+        );
+        
+        if (parentMsg) {
+          return {
+            ...msg.toObject(), // Convert to plain object if needed
+            parentMessage: {
+              _id: parentMsg._id,
+              sender: parentMsg.sender, // Already populated from above
+              content: parentMsg.content,
+              createdAt: parentMsg.createdAt
+            }
+          };
+        }
+      }
+      return msg.toObject ? msg.toObject() : msg;
+    });
+
+    console.log(`✅ Returning ${populatedMessages.length} messages`);
+    return res.status(200).json({ success: true, messages: populatedMessages });
+
   } catch (error) {
     console.error("🔥 ERROR GETTING TASK MESSAGES:", error);
-    return res.status(500).json({ message: "Failed", error });
+    return res.status(500).json({ 
+      message: "Failed to fetch messages", 
+      error: error instanceof Error ? error.message : "Unknown error" 
+    });
   }
 };
 
 // =============================
-// ADD TASK MESSAGE (WITH ACTIVITY LOGGING & MENTIONS)
+// ADD TASK MESSAGE - WITH REPLY SUPPORT & MENTIONS
 // =============================
 export const addTaskMessage = async (
   req: RequestWithUser,
@@ -466,10 +499,11 @@ export const addTaskMessage = async (
   console.log("➡ User ID:", req.user?.id);
   console.log("➡ User Name:", req.user?.name);
   console.log("➡ Content:", req.body.content);
+  console.log("➡ Parent Message ID:", req.body.parentMessageId);
 
   try {
     const { id: taskId } = req.params;
-    const { content } = req.body;
+    const { content, parentMessageId } = req.body;
 
     if (!content) {
       console.log("❌ No content provided");
@@ -496,15 +530,41 @@ export const addTaskMessage = async (
       console.log("✅ Chat created:", chat._id);
     }
 
+    // 🆕 CREATE MESSAGE WITH PARENT REFERENCE
     const message = {
       sender: new mongoose.Types.ObjectId(req.user!.id),
       content,
       createdAt: new Date(),
+      parentMessage: parentMessageId ? new mongoose.Types.ObjectId(parentMessageId) : null,
     };
 
     chat.messages.push(message as any);
     await chat.save();
     console.log("💾 Message saved to database");
+
+    // 🆕 GET THE SAVED MESSAGE AND POPULATE PARENT
+    const savedMessage = chat.messages[chat.messages.length - 1];
+    let populatedParent = null;
+
+    if (savedMessage.parentMessage) {
+      const parentMsg = chat.messages.find(
+        (m: any) => m._id.toString() === savedMessage.parentMessage!.toString()
+      );
+
+      if (parentMsg) {
+        const parentSender = await User.findById(parentMsg.sender);
+        populatedParent = {
+          _id: parentMsg._id,
+          sender: parentSender ? {
+            _id: parentSender._id,
+            name: parentSender.name,
+            email: parentSender.email
+          } : null,
+          content: parentMsg.content,
+          createdAt: parentMsg.createdAt
+        };
+      }
+    }
 
     const task = await Task.findById(taskId);
     const taskTitle = task ? task.title : "Unknown Task";
@@ -524,161 +584,145 @@ export const addTaskMessage = async (
         taskTitle: taskTitle,
         chatId: chat._id.toString(),
         messageLength: content.length,
+        isReply: !!parentMessageId,
       },
     });
 
-    // ========================================================
-    // 🔍 SUPER DEBUG VERSION — MENTION DETECTION & NOTIFICATIONS
-    // ========================================================
-   // In TaskChatController.ts - addTaskMessage function
-// Replace the mention detection section with this:
-
-// ✅ DETECT @MENTIONS AND CREATE NOTIFICATIONS + ACTIVITY LOGS
-console.log("🔍 [MENTION CHECK] Checking for mentions in message...");
-
-// 🔥 FIX: Support names with spaces
-// Old regex: /@(\w+)/g  ← Only matches single words
-// New regex: Matches @name or @"full name with spaces"
-const mentionMatches = content.match(/@"([^"]+)"|@(\S+)/g) || [];
-
-console.log("🔍 Raw content:", content);
-console.log("🔍 Regex raw matches:", mentionMatches);
-
-if (mentionMatches.length > 0) {
-  console.log("📢 [MENTIONS] Found mentions:", mentionMatches);
-  
-  for (const match of mentionMatches) {
-    // Extract username - handle both @name and @"name with spaces"
-    let username: string;
-    
-    if (match.startsWith('@"')) {
-      // @"full name" format
-      username = match.slice(2, -1); // Remove @" and trailing "
-    } else {
-      // @name format
-      username = match.slice(1); // Remove @
-    }
-    
-    console.log("─────────────────────────────────────────────────────");
-    console.log(`🔍 [MENTION] Processing token: ${match}`);
-    console.log(`➡ Extracted username: "${username}"`);
-    console.log(`🔎 Looking for user "${username}" in DB...`);
-    
-    // Find the mentioned user by name (exact match, case-insensitive)
-    const mentionedUser = await User.findOne({ 
-      name: { $regex: new RegExp(`^${username}$`, 'i') } 
-    });
-    
-    if (!mentionedUser) {
-      console.warn(`❌ User "${username}" NOT FOUND.`);
-      continue;
-    }
-    
-    console.log(`✅ User "${username}" FOUND!`);
-    console.log(`   → User ID: ${mentionedUser._id}`);
-    console.log(`   → User email: ${mentionedUser.email}`);
-    
-    // Don't notify if user mentions themselves
-    if (mentionedUser._id.toString() === req.user!.id) {
-      console.log(`ℹ️ [MENTION] Skipping self-mention`);
-      continue;
-    }
-    
-    console.log(`✅ [MENTION] Found user: ${mentionedUser.name} (${mentionedUser._id})`);
-    
-    // Create notification in database
-    try {
-      const notification = await Notification.create({
-        user: mentionedUser._id,
-        type: "mention",
-        message: `${req.user!.name} mentioned you in chat: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`,
-        task: taskId,
-        status: "pending",
-        isRead: false
-      });
-      
-      console.log("📝 [NOTIFICATION] Created notification:", notification._id);
-      console.log("   → Recipient:", mentionedUser._id.toString());
-      console.log("   → Type:", notification.type);
-      console.log("   → Message:", notification.message);
-
-      // ✅ LOG ACTIVITY - Mentioned user's perspective
-      await logActivity({
-        userId: mentionedUser._id.toString(),
-        action: "mentioned",
-        entityType: "mention",
-        entityId: chat._id.toString(),
-        description: `${req.user!.name} mentioned you`,
-        details: `You were mentioned in "${taskTitle}": ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`,
-        metadata: {
-          mentionedBy: req.user!.name,
-          mentionedById: req.user!.id,
-          taskId: taskId,
-          taskTitle: taskTitle,
-          messageContent: content,
-        },
-      });
-
-      // ✅ LOG ACTIVITY - Mentioner's perspective
-      await logActivity({
-        userId: req.user!.id,
-        action: "mentioned_user",
-        entityType: "mention",
-        entityId: chat._id.toString(),
-        description: `Mentioned @${mentionedUser.name}`,
-        details: `You mentioned ${mentionedUser.name} in "${taskTitle}"`,
-        metadata: {
-          mentionedUser: mentionedUser.name,
-          mentionedUserId: mentionedUser._id.toString(),
-          taskId: taskId,
-          taskTitle: taskTitle,
-        },
-      });
-      
-      // Emit notification via Socket.IO
-      if (io) {
-        const notificationPayload = {
-          _id: notification._id,
-          type: notification.type,
-          message: notification.message,
-          task: notification.task,
-          status: notification.status,
-          isRead: notification.isRead,
-          createdAt: notification.createdAt,
-          user: notification.user
-        };
-        
-        const recipientUserId = mentionedUser._id.toString();
-        console.log("📡 [SOCKET] Emitting to room:", recipientUserId);
-        
-        io.to(recipientUserId).emit("newNotification", notificationPayload);
-        console.log("✅ [SOCKET] Notification emitted to user:", recipientUserId);
-        
-        // Also emit a mention-specific event
-        io.to(recipientUserId).emit("mentionNotification", {
-          senderName: req.user!.name,
-          taskId,
-          message: content
-        });
-        console.log("✅ [SOCKET] Mention notification emitted");
-      } else {
-        console.error("❌ [SOCKET] io instance not available!");
-      }
-    } catch (notifError) {
-      console.error("❌ [NOTIFICATION] Failed to create notification:", notifError);
-    }
-  }
-  
-  console.log("✅ [MENTION CHECK] All mentions processed");
-} else {
-  console.log("ℹ️ [MENTION CHECK] No mentions found in message");
-}
     // ======================
-    // BROADCAST MESSAGE TO TASK ROOM
+    // MENTION DETECTION
+    // ======================
+    console.log("🔍 [MENTION CHECK] Checking for mentions in message...");
+    const mentionMatches = content.match(/@"([^"]+)"|@(\S+)/g) || [];
+
+    console.log("🔍 Raw content:", content);
+    console.log("🔍 Regex raw matches:", mentionMatches);
+
+    if (mentionMatches.length > 0) {
+      console.log("📢 [MENTIONS] Found mentions:", mentionMatches);
+
+      for (const match of mentionMatches) {
+        let username: string;
+
+        if (match.startsWith('@"')) {
+          username = match.slice(2, -1);
+        } else {
+          username = match.slice(1);
+        }
+
+        console.log("─────────────────────────────────────────────────────");
+        console.log(`🔍 [MENTION] Processing token: ${match}`);
+        console.log(`➡ Extracted username: "${username}"`);
+        console.log(`🔎 Looking for user "${username}" in DB...`);
+
+        const mentionedUser = await User.findOne({
+          name: { $regex: new RegExp(`^${username}$`, 'i') }
+        });
+
+        if (!mentionedUser) {
+          console.warn(`❌ User "${username}" NOT FOUND.`);
+          continue;
+        }
+
+        console.log(`✅ User "${username}" FOUND!`);
+        console.log(`   → User ID: ${mentionedUser._id}`);
+        console.log(`   → User email: ${mentionedUser.email}`);
+
+        if (mentionedUser._id.toString() === req.user!.id) {
+          console.log(`ℹ️ [MENTION] Skipping self-mention`);
+          continue;
+        }
+
+        console.log(`✅ [MENTION] Found user: ${mentionedUser.name} (${mentionedUser._id})`);
+
+        try {
+          const notification = await Notification.create({
+            user: mentionedUser._id,
+            type: "mention",
+            message: `${req.user!.name} mentioned you in chat: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`,
+            task: taskId,
+            status: "pending",
+            isRead: false
+          });
+
+          console.log("📝 [NOTIFICATION] Created notification:", notification._id);
+          console.log("   → Recipient:", mentionedUser._id.toString());
+          console.log("   → Type:", notification.type);
+          console.log("   → Message:", notification.message);
+
+          await logActivity({
+            userId: mentionedUser._id.toString(),
+            action: "mentioned",
+            entityType: "mention",
+            entityId: chat._id.toString(),
+            description: `${req.user!.name} mentioned you`,
+            details: `You were mentioned in "${taskTitle}": ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`,
+            metadata: {
+              mentionedBy: req.user!.name,
+              mentionedById: req.user!.id,
+              taskId: taskId,
+              taskTitle: taskTitle,
+              messageContent: content,
+            },
+          });
+
+          await logActivity({
+            userId: req.user!.id,
+            action: "mentioned_user",
+            entityType: "mention",
+            entityId: chat._id.toString(),
+            description: `Mentioned @${mentionedUser.name}`,
+            details: `You mentioned ${mentionedUser.name} in "${taskTitle}"`,
+            metadata: {
+              mentionedUser: mentionedUser.name,
+              mentionedUserId: mentionedUser._id.toString(),
+              taskId: taskId,
+              taskTitle: taskTitle,
+            },
+          });
+
+          if (io) {
+            const notificationPayload = {
+              _id: notification._id,
+              type: notification.type,
+              message: notification.message,
+              task: notification.task,
+              status: notification.status,
+              isRead: notification.isRead,
+              createdAt: notification.createdAt,
+              user: notification.user
+            };
+
+            const recipientUserId = mentionedUser._id.toString();
+            console.log("📡 [SOCKET] Emitting to room:", recipientUserId);
+
+            io.to(recipientUserId).emit("newNotification", notificationPayload);
+            console.log("✅ [SOCKET] Notification emitted to user:", recipientUserId);
+
+            io.to(recipientUserId).emit("mentionNotification", {
+              senderName: req.user!.name,
+              taskId,
+              message: content
+            });
+            console.log("✅ [SOCKET] Mention notification emitted");
+          } else {
+            console.error("❌ [SOCKET] io instance not available!");
+          }
+        } catch (notifError) {
+          console.error("❌ [NOTIFICATION] Failed to create notification:", notifError);
+        }
+      }
+
+      console.log("✅ [MENTION CHECK] All mentions processed");
+    } else {
+      console.log("ℹ️ [MENTION CHECK] No mentions found in message");
+    }
+
+    // ======================
+    // BROADCAST MESSAGE TO TASK ROOM WITH POPULATED PARENT
     // ======================
     const taskRoom = `task_${taskId}`;
     const emittedMessage = {
-      _id: message.sender.toString(),
+      _id: savedMessage._id.toString(),
       sender: {
         _id: req.user!.id,
         id: req.user!.id,
@@ -686,7 +730,8 @@ if (mentionMatches.length > 0) {
         email: req.user!.email,
       },
       content,
-      createdAt: message.createdAt,
+      createdAt: savedMessage.createdAt,
+      parentMessage: populatedParent,
     };
 
     try {

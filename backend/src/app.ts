@@ -2,6 +2,8 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import morgan from "morgan";
 import dotenv from "dotenv";
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './config/swagger';
 
 // ✅ Route Imports
 import authRoutes from "./routes/authRoutes";
@@ -36,6 +38,9 @@ console.log("🚀 Starting Express server...");
 console.log(`🌍 FRONTEND_URL: ${FRONTEND_URL}`);
 console.log(`🧱 NODE_ENV: ${NODE_ENV}`);
 
+// ✅ Swagger Documentation - ADD THIS BEFORE YOUR ROUTES
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
 // ✅ Routes
 app.use("/api/auth", authRoutes);
 app.use('/api/activities', activityRoutes);
@@ -43,7 +48,7 @@ app.use("/api/comments", commentRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/tasks", taskRoutes);
-app.use("/api", chatRoutes); // handles /api/chats/... etc.
+app.use("/api", chatRoutes);
 
 // ✅ Health check route
 app.get("/api/health", (req: Request, res: Response) => {
