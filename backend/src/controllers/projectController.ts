@@ -219,75 +219,7 @@ export const deleteProject = async (req: Request, res: Response) => {
 // ========================================
 // 📧 Invite User to Project
 // ========================================
-export const inviteUserToProject = async (req: Request, res: Response) => {
-  console.log("📨 [DEBUG] inviteUserToProject triggered");
-  try {
-    const { projectId, email } = req.body;
-    const inviter = req.user;
-    if (!inviter) return res.status(401).json({ message: "Not authenticated" });
 
-    const project = await Project.findById(projectId);
-    if (!project) return res.status(404).json({ message: "Project not found" });
-
-    const invitedUser = await User.findOne({ email });
-    if (!invitedUser) return res.status(404).json({ message: "User not found" });
-
-    const alreadyMember = project.members.some(
-      (m) => m.user.toString() === invitedUser._id.toString()
-    );
-    if (alreadyMember)
-      return res.status(400).json({ message: "User is already a member" });
-
-    project.members.push({ user: invitedUser._id, role: "viewer" });
-    await project.save();
-
-    console.log("✅ [DEBUG] Added user as viewer to project:", project.name);
-
-    const joinLink = `https://yourfrontend.com/invite/${projectId}`;
-    await sendEmail({
-      to: email,
-      subject: `Invitation to join project "${project.name}"`,
-      html: `<p>${inviter.name} invited you to join ${project.name}. <a href="${joinLink}">Join</a></p>`,
-    });
-
-    // ✅ FIXED: Update activity logging for invite
-    await logActivity({
-      userId: inviter.id,
-      action: "invited",
-      entityType: "project",
-      entityId: project._id.toString(),
-      description: `Invited ${invitedUser.name} to project "${project.name}"`,
-      details: `${inviter.name} invited ${email} to join project "${project.name}"`,
-      metadata: {
-        projectId: project._id.toString(),
-        projectName: project.name,
-        invitedUserEmail: email,
-        invitedUserId: invitedUser._id.toString(),
-      },
-    });
-
-    // ✅ NEW: Log activity for the invited user
-    await logActivity({
-      userId: invitedUser._id.toString(),
-      action: "invited",
-      entityType: "project",
-      entityId: project._id.toString(),
-      description: `You were invited to project "${project.name}"`,
-      details: `${inviter.name} invited you to join project "${project.name}"`,
-      metadata: {
-        projectId: project._id.toString(),
-        projectName: project.name,
-        invitedBy: inviter.id,
-        inviterName: inviter.name,
-      },
-    });
-
-    res.status(200).json({ message: "Invitation sent successfully" });
-  } catch (error) {
-    console.error("❌ [DEBUG] inviteUserToProject error:", error);
-    res.status(500).json({ message: "Failed to send invite", error });
-  }
-};
 
 // ========================================
 // ✏️ Update Project

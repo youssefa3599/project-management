@@ -82,6 +82,8 @@ const AppNavbar: React.FC = () => {
 
   /** ---------------------------------------
    * Socket setup for live updates
+   * ✅ CRITICAL FIX: Only cleanup on token change (login/logout)
+   * NOT on route navigation!
    * --------------------------------------- */
   useEffect(() => {
     if (!token || !user) {
@@ -94,34 +96,34 @@ const AppNavbar: React.FC = () => {
     console.log("   → User ID:", user.id);
     console.log("   → User Name:", user.name);
     console.log("   → User Email:", user.email);
+    console.log("   → Current Route:", location.pathname);
     
     const socket = connectSocket(token);
     console.log("   → Socket instance obtained");
 
     // Test if socket is connected
-    socket.on("connect", () => {
+    const handleConnect = () => {
       console.log("✅ [Navbar Socket] Socket CONNECTED");
       console.log("   → Socket ID:", socket.id);
-    });
+    };
 
-    socket.on("disconnect", (reason) => {
+    const handleDisconnect = (reason: string) => {
       console.log("❌ [Navbar Socket] Socket DISCONNECTED");
       console.log("   → Reason:", reason);
-    });
+    };
 
-    socket.on("connect_error", (error) => {
+    const handleConnectError = (error: Error) => {
       console.error("❌ [Navbar Socket] Connection ERROR");
       console.error("   → Error:", error.message);
-    });
+    };
 
-    // Listen for welcome message from server
-    socket.on("welcome", (data) => {
+    const handleWelcome = (data: any) => {
       console.log("👋 [Navbar Socket] Welcome message received");
       console.log("   → Data:", data);
-    });
+    };
 
     // Listen for new notifications (mentions)
-    socket.on("newNotification", (notification: INotification) => {
+    const handleNewNotification = (notification: INotification) => {
       console.log("═══════════════════════════════════════════════════════");
       console.log("📩 [Navbar Socket] Received newNotification event");
       console.log("   → Notification ID:", notification._id);
@@ -142,9 +144,9 @@ const AppNavbar: React.FC = () => {
         console.log("   → This notification is already READ - not incrementing");
       }
       console.log("═══════════════════════════════════════════════════════");
-    });
+    };
 
-    socket.on("notificationCreated", (notification: INotification) => {
+    const handleNotificationCreated = (notification: INotification) => {
       console.log("═══════════════════════════════════════════════════════");
       console.log("📩 [Navbar Socket] Received notificationCreated event");
       console.log("   → Notification ID:", notification._id);
@@ -165,9 +167,9 @@ const AppNavbar: React.FC = () => {
         console.log("   → This notification is already READ - not incrementing");
       }
       console.log("═══════════════════════════════════════════════════════");
-    });
+    };
 
-    socket.on("notificationRead", () => {
+    const handleNotificationRead = () => {
       console.log("═══════════════════════════════════════════════════════");
       console.log("📖 [Navbar Socket] Received notificationRead event");
       setUnreadCount((prev) => {
@@ -176,15 +178,17 @@ const AppNavbar: React.FC = () => {
         return newCount;
       });
       console.log("═══════════════════════════════════════════════════════");
-    });
+    };
 
-    socket.on("notificationUpdated", (notification: INotification) => {
-      console.log("═══════════════════════════════════════════════════════");
-      console.log("🔄 [Navbar Socket] Received notificationUpdated event");
+    const handleNotificationUpdated = (notification: INotification) => {
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      console.log("🔔 [Navbar Socket] NOTIFICATION UPDATED RECEIVED! 🎉");
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
       console.log("   → Notification ID:", notification._id);
       console.log("   → Type:", notification.type);
       console.log("   → isRead:", notification.isRead);
       console.log("   → Status:", notification.status);
+      console.log("   → Current Route:", location.pathname);
       console.log("   → Full payload:", JSON.stringify(notification, null, 2));
       
       // If notification was marked as read, decrease count
@@ -198,11 +202,10 @@ const AppNavbar: React.FC = () => {
       } else {
         console.log("   → Notification is UNREAD - no change to counter");
       }
-      console.log("═══════════════════════════════════════════════════════");
-    });
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    };
 
-    // Listen for bulk read event (when opening notifications page)
-    socket.on("notificationsMarkedRead", (data: { count: number }) => {
+    const handleNotificationsMarkedRead = (data: { count: number }) => {
       console.log("═══════════════════════════════════════════════════════");
       console.log("📚 [Navbar Socket] Received notificationsMarkedRead event");
       console.log(`   → Count to decrease: ${data.count}`);
@@ -212,37 +215,53 @@ const AppNavbar: React.FC = () => {
         return newCount;
       });
       console.log("═══════════════════════════════════════════════════════");
-    });
+    };
 
-    // Listen for any other events (debugging)
-    socket.onAny((eventName, ...args) => {
+    const handleAnyEvent = (eventName: string, ...args: any[]) => {
       if (eventName !== 'connect' && eventName !== 'disconnect' && eventName !== 'welcome') {
         console.log("📡 [Navbar Socket] Received event:", eventName);
         console.log("   → Args:", args);
       }
-    });
+    };
+
+    // ✅ Register ALL event listeners
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleConnectError);
+    socket.on("welcome", handleWelcome);
+    socket.on("newNotification", handleNewNotification);
+    socket.on("notificationCreated", handleNotificationCreated);
+    socket.on("notificationRead", handleNotificationRead);
+    socket.on("notificationUpdated", handleNotificationUpdated);
+    socket.on("notificationsMarkedRead", handleNotificationsMarkedRead);
+    socket.onAny(handleAnyEvent);
 
     console.log("✅ [Navbar Socket] All event listeners registered");
     console.log("═══════════════════════════════════════════════════════");
 
+    // ✅✅ CRITICAL FIX: Only cleanup when token changes (logout), NOT on route change!
     return () => {
       console.log("═══════════════════════════════════════════════════════");
       console.log("🔌 [Navbar Socket] Cleaning up socket listeners");
-      socket.off("connect");
-      socket.off("disconnect");
-      socket.off("connect_error");
-      socket.off("welcome");
-      socket.off("newNotification");
-      socket.off("notificationCreated");
-      socket.off("notificationRead");
-      socket.off("notificationUpdated");
-      socket.off("notificationsMarkedRead");
-      socket.offAny();
+      console.log("   → Reason: Token changed or component unmounting");
+      console.log("   → Current Route:", location.pathname);
+      
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleConnectError);
+      socket.off("welcome", handleWelcome);
+      socket.off("newNotification", handleNewNotification);
+      socket.off("notificationCreated", handleNotificationCreated);
+      socket.off("notificationRead", handleNotificationRead);
+      socket.off("notificationUpdated", handleNotificationUpdated);
+      socket.off("notificationsMarkedRead", handleNotificationsMarkedRead);
+      socket.offAny(handleAnyEvent);
+      
       // DON'T call forceDisconnectSocket() here! Keep socket alive
       console.log("✅ [Navbar Socket] Listeners removed (socket kept alive)");
       console.log("═══════════════════════════════════════════════════════");
     };
-  }, [token, user]);
+  }, [token]); // ✅ ONLY depend on token, NOT user or location.pathname!
 
   return (
     <nav className="app-navbar">
@@ -275,9 +294,58 @@ const AppNavbar: React.FC = () => {
           className={({ isActive }) =>
             `navbar-link ${isActive ? "active-link" : ""}`
           }
-          onClick={() => {
+          onClick={async (e) => {
+            console.log("═══════════════════════════════════════════════════════");
             console.log("🔔 [Navbar] Notifications link clicked");
             console.log("   → Current unread count:", unreadCount);
+            console.log("   → Token present:", !!token);
+            console.log("   → API_URL:", API_URL);
+            
+            // If there are unread notifications, mark all as read
+            if (unreadCount > 0 && token) {
+              try {
+                console.log("📚 [Navbar] Marking all notifications as read...");
+                const url = `${API_URL}/api/notifications/read-all`;
+                
+                console.log("   → Request URL:", url);
+                console.log("   → Request method: PATCH");
+                console.log("   → Token (first 20 chars):", token.substring(0, 20) + "...");
+                
+                const response = await axios.patch(
+                  url,
+                  {},
+                  { 
+                    headers: { 
+                      Authorization: `Bearer ${token}`,
+                      'Content-Type': 'application/json'
+                    } 
+                  }
+                );
+                
+                console.log("✅ [Navbar] Mark all as read SUCCESS!");
+                console.log("   → Response status:", response.status);
+                console.log("   → Response data:", JSON.stringify(response.data, null, 2));
+                console.log("   → Marked count:", response.data.count);
+                
+                // The socket listener will handle updating the counter
+                console.log("   → Socket will handle counter update via 'notificationsMarkedRead' event");
+                console.log("   → Waiting for socket event...");
+              } catch (error: any) {
+                console.error("❌ [Navbar] Failed to mark all as read!");
+                console.error("   → Error message:", error.message);
+                console.error("   → Error response status:", error.response?.status);
+                console.error("   → Error response data:", JSON.stringify(error.response?.data, null, 2));
+                console.error("   → Full error:", error);
+              }
+            } else {
+              if (unreadCount === 0) {
+                console.log("ℹ️ [Navbar] No unread notifications to mark");
+              }
+              if (!token) {
+                console.error("❌ [Navbar] No token available!");
+              }
+            }
+            console.log("═══════════════════════════════════════════════════════");
           }}
         >
           Notifications

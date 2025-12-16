@@ -89,7 +89,7 @@ export const createComment = async (req: Request, res: Response) => {
         console.log(`✅ [MENTION] Found user: ${mentionedUser.name} (${mentionedUser._id})`);
 
         // ═══════════════════════════════════════════════════════
-        // 🔥 CRITICAL: CREATE NOTIFICATION IN DATABASE
+        // 🔥 CRITICAL FIX: CREATE NOTIFICATION WITH taskId
         // ═══════════════════════════════════════════════════════
         try {
           const notification = await Notification.create({
@@ -97,36 +97,48 @@ export const createComment = async (req: Request, res: Response) => {
             type: "mention",
             message: `${userName} mentioned you in a comment: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
             task: taskId,
+            taskId: taskId,  // ← CRITICAL: Frontend needs this field
             status: "pending",
             isRead: false
           });
 
-          console.log("📝 [MENTION] Notification created in database:");
+          console.log("📝 [MENTION] ✅ Notification created in database:");
           console.log("   → Notification ID:", notification._id);
           console.log("   → Type:", notification.type);
           console.log("   → Recipient:", mentionedUser._id);
+          console.log("   → task field:", notification.task);
+          console.log("   → taskId field:", taskId);
+          console.log("   → 🎯 BOTH task AND taskId included!");
 
           // ═══════════════════════════════════════════════════════
-          // 📡 Emit Socket.IO notification (if available)
+          // 📡 CRITICAL FIX: Emit Socket.IO with taskId
           // ═══════════════════════════════════════════════════════
           if (io) {
             const mentionedUserId = mentionedUser._id.toString();
             
-            console.log("📡 [SOCKET EMIT] Emitting notification to user:", mentionedUserId);
+            console.log("📡 [SOCKET EMIT] Preparing notification payload...");
             
-            // Emit to user's personal room
-            io.to(mentionedUserId).emit("newNotification", {
-              _id: notification._id,
+            const socketPayload = {
+              _id: notification._id.toString(),
               type: notification.type,
               message: notification.message,
               task: notification.task,
+              taskId: taskId,  // ← CRITICAL: Frontend needs this
               status: notification.status,
               isRead: notification.isRead,
               createdAt: notification.createdAt,
               user: notification.user
-            });
+            };
 
-            console.log("✅ [SOCKET EMIT] Notification emitted successfully");
+            console.log("📦 [SOCKET PAYLOAD]:", JSON.stringify(socketPayload, null, 2));
+            
+            // Emit to user's personal room
+            io.to(mentionedUserId).emit("newNotification", socketPayload);
+
+            console.log("✅ [SOCKET EMIT] Notification emitted to user:", mentionedUserId);
+            console.log("   → Room: ", mentionedUserId);
+            console.log("   → Event: newNotification");
+            console.log("   → Payload includes taskId: ✅");
           }
 
           // ═══════════════════════════════════════════════════════
@@ -156,6 +168,7 @@ export const createComment = async (req: Request, res: Response) => {
 
         } catch (notifError) {
           console.error("❌ [MENTION] Failed to create notification:", notifError);
+          console.error("   Error details:", notifError);
           // Continue processing other mentions
         }
       }
@@ -250,6 +263,3 @@ export const getCommentsByTask = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-/* =========================
-   📄 Get Comments with Nested Replies
-   ========================= */

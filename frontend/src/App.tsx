@@ -15,7 +15,7 @@ import ProjectsPage from "./pages/ProjectsPage";
 import ProjectDetailsPage from "./pages/ProjectDetailsPage";
 import EditProjectPage from "./pages/EditProjectPage";
 import ChatPage from "./pages/ChatPage";
-import InvitePage from "./pages/InvitePage";
+
 import NotificationsPage from "./pages/NotificationPage";
 
 import AppNavbar from "./components/AppNavbar";
@@ -44,7 +44,7 @@ function ScrollToTop() {
 /** -------------------------------------
  * Protected route wrapper
  * ------------------------------------- */
-function ProtectedRoute({ children }: { children: JSX.Element }) {
+function ProtectedRoute({ children }: { children: React.JSX.Element }) {
   const { user, loading } = useAuth();
   if (loading) return null;
   return user ? children : <Navigate to="/login" replace />;
@@ -53,7 +53,7 @@ function ProtectedRoute({ children }: { children: JSX.Element }) {
 /** -------------------------------------
  * Layout with navbar
  * ------------------------------------- */
-function AppLayout({ children }: { children: JSX.Element }) {
+function AppLayout({ children }: { children: React.JSX.Element }) {
   return (
     <>
       <AppNavbar />
@@ -150,16 +150,7 @@ function AppRoutes() {
         }
       />
 
-      <Route
-        path="/chats/:taskId/invite"
-        element={
-          <ProtectedRoute>
-            <AppLayout>
-              <InvitePage />
-            </AppLayout>
-          </ProtectedRoute>
-        }
-      />
+     
 
       {/* Redirects */}
       <Route

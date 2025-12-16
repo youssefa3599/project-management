@@ -100,16 +100,7 @@ const handleTaskClick = (task: ITask) => {
         {project.description && <p className="project-desc">{project.description}</p>}
       </header>
 
-      <section className="members-section">
-        <h3 className="section-title">Members</h3>
-        <ul className="members-list">
-          {project.members.map((m) => (
-            <li key={m._id} className="member-item">
-              {m.name} <span className="member-role">({m.role})</span>
-            </li>
-          ))}
-        </ul>
-      </section>
+     
 
       <section>
         <div className="tasks-header">

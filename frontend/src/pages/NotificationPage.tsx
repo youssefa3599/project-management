@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { connectSocket } from "../utils/socket";
 import "./NotificationPage.css";
 
 interface INotification {
@@ -17,7 +18,7 @@ interface INotification {
 }
 
 export default function NotificationPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [notifications, setNotifications] = useState<INotification[]>([]);
   const [respondingTo, setRespondingTo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -25,6 +26,7 @@ export default function NotificationPage() {
 
   const API_URL = import.meta.env.VITE_API_URL;
 
+  // Fetch notifications from API
   useEffect(() => {
     const fetchNotifications = async () => {
       if (!token) {
@@ -45,25 +47,7 @@ export default function NotificationPage() {
         const unreadCount = notificationsArray.filter(n => !n.isRead).length;
         console.log(`📊 Unread notifications: ${unreadCount}/${notificationsArray.length}`);
 
-        console.table(
-          notificationsArray.map((n: INotification) => ({
-            id: n._id.substring(0, 8),
-            type: n.type,
-            status: n.status,
-            isRead: n.isRead ? '✅' : '❌',
-            createdAt: new Date(n.createdAt).toLocaleTimeString(),
-          }))
-        );
-
         setNotifications(notificationsArray);
-        
-        // Mark all unread notifications as read when opening the page
-        if (unreadCount > 0) {
-          console.log(`🔄 Marking ${unreadCount} notifications as read...`);
-          markAllAsRead(notificationsArray);
-        } else {
-          console.log("✅ All notifications already read!");
-        }
       } catch (err) {
         console.error("❌ [FETCH ERROR] Failed to fetch notifications:", err);
       } finally {
@@ -74,55 +58,43 @@ export default function NotificationPage() {
     fetchNotifications();
   }, [token, API_URL]);
 
-  const markAllAsRead = async (notifs: INotification[]) => {
-    const unreadIds = notifs.filter(n => !n.isRead).map(n => n._id);
+  // 🔥 NEW: Listen for live socket notifications
+  useEffect(() => {
+    if (!token || !user) return;
+
+    console.log("🔌 [NotificationPage] Setting up socket listener for live updates");
+    const socket = connectSocket(token);
+
+    // Listen for new notifications
+    const handleNewNotification = (notif: INotification) => {
+      console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      console.log("🔔 [NotificationPage] NEW NOTIFICATION RECEIVED VIA SOCKET");
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      console.log("   Type:", notif.type);
+      console.log("   Message:", notif.message);
+      console.log("   taskId:", notif.taskId);
+      console.log("   task:", notif.task);
+      console.log("   Has taskId?:", !!notif.taskId);
+      console.log("   Has task?:", !!notif.task);
+      console.log("   Full payload:", JSON.stringify(notif, null, 2));
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+      // Add to notifications list at the top
+      setNotifications(prev => [notif, ...prev]);
+      console.log("✅ [NotificationPage] Notification added to local state");
+    };
+
+    socket.on("newNotification", handleNewNotification);
     
-    if (unreadIds.length === 0) {
-      console.log("✅ No unread notifications to mark");
-      return;
-    }
 
-    try {
-      console.log(`📖 Marking ${unreadIds.length} notifications as read...`);
-      console.log(`📋 IDs to mark:`, unreadIds);
-      
-      // Mark notifications one by one with proper delays
-      let successCount = 0;
-      let failCount = 0;
+    console.log("✅ [NotificationPage] Socket listeners registered");
 
-      for (const id of unreadIds) {
-        try {
-          const response = await axios.patch(
-            `${API_URL}/api/notifications/${id}/read`,
-            {},
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          
-          console.log(`✅ Marked ${id.substring(0, 8)}... as read`);
-          successCount++;
-          
-          // Update local state immediately for this notification
-          setNotifications(prev =>
-            prev.map(n => (n._id === id ? { ...n, isRead: true } : n))
-          );
-          
-          // Small delay between requests to prevent overwhelming
-          await new Promise(resolve => setTimeout(resolve, 50));
-        } catch (err: any) {
-          console.error(`❌ Failed to mark ${id.substring(0, 8)}... as read:`, err.response?.data || err.message);
-          failCount++;
-        }
-      }
-
-      console.log(`📊 Results: ${successCount} success, ${failCount} failed`);
-
-      if (successCount > 0) {
-        console.log("✅ All notifications marked as read successfully!");
-      }
-    } catch (err) {
-      console.error("❌ Failed to mark all as read:", err);
-    }
-  };
+    return () => {
+      socket.off("newNotification", handleNewNotification);
+      socket.off("mentionNotification", handleNewNotification);
+      console.log("🔌 [NotificationPage] Socket listeners cleaned up");
+    };
+  }, [token, user]);
 
   const handleRespondToInvite = async (
     notificationId: string,
@@ -166,25 +138,25 @@ export default function NotificationPage() {
     try {
       console.log(`📖 Marking notification ${notificationId} as read...`);
       
-      const response = await axios.patch(
+      await axios.patch(
         `${API_URL}/api/notifications/${notificationId}/read`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      console.log(`✅ Response:`, response.data);
-
       setNotifications((prev) =>
         prev.map((n) => (n._id === notificationId ? { ...n, isRead: true } : n))
       );
       
-      console.log(`✅ Notification ${notificationId} marked as read successfully`);
+      console.log(`✅ Notification marked as read`);
     } catch (err: any) {
       console.error("❌ Failed to mark as read:", err.response?.data || err.message);
     }
   };
 
   const handleNotificationClick = async (notification: INotification) => {
+    console.log("\n🖱️ [CLICK] Notification clicked:", notification.type);
+
     // Mark as read if not already
     if (!notification.isRead) {
       await handleMarkAsRead(notification._id);
@@ -197,6 +169,7 @@ export default function NotificationPage() {
           ? notification.task 
           : notification.task?._id || notification.taskId;
         if (taskId) {
+          console.log("➡️ Navigating to:", `/chats/${taskId}`);
           navigate(`/chats/${taskId}`);
         }
       }
@@ -204,8 +177,13 @@ export default function NotificationPage() {
   };
 
   const handleViewChat = (taskId?: string | { _id: string }) => {
-    if (!taskId) return;
+    console.log("🔘 [VIEW CHAT CLICKED] taskId:", taskId);
+    if (!taskId) {
+      console.error("❌ No taskId provided!");
+      return;
+    }
     const id = typeof taskId === "string" ? taskId : taskId._id;
+    console.log("➡️ Navigating to:", `/chats/${id}`);
     navigate(`/chats/${id}`);
   };
 

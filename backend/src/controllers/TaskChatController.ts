@@ -100,12 +100,13 @@ export const inviteMemberToTaskChat = async (req: RequestWithUser, res: Response
     }
 
     const notification = await Notification.create({
-      user: userId,
-      type: "taskChatInvite",
-      message: `You've been invited to join the chat "${chat.name}"`,
-      task: chat.taskId,
-      status: "pending",
-    });
+  user: userId,
+  type: "taskChatInvite",
+  message: `You've been invited to join the chat "${chat.name}"`,
+  task: chat.taskId,
+  taskId: chat.taskId,  // ← ADD THIS LINE
+  status: "pending",
+});
 
     console.log("✅ [DEBUG] Notification created:", notification._id);
 
@@ -419,17 +420,29 @@ export const updateTaskGoalStatus = async (
 // =============================
 // GET TASK MESSAGES - FIXED ✅
 // =============================
+// =============================
+// GET TASK MESSAGES - PAGINATED ✅
+// =============================
+// =============================
+// GET TASK MESSAGES - PAGINATED ✅
+// =============================
 export const getTaskMessages = async (
   req: RequestWithUser,
   res: Response
 ): Promise<Response | void> => {
-  console.log("\n\n✅ [GET TASK MESSAGES]");
+  console.log("\n\n✅ [GET TASK MESSAGES - PAGINATED]");
   console.log("➡ Task ID:", req.params.id);
 
   try {
     const { id: taskId } = req.params;
+    
+    // Parse pagination params
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const skip = (page - 1) * limit;
 
-    // ✅ Remove .lean() to keep consistent Document type
+    console.log(`📄 Page: ${page}, Limit: ${limit}, Skip: ${skip}`);
+
     let chat = await Chat.findOne({ taskId })
       .populate("messages.sender", "name email");
 
@@ -449,23 +462,52 @@ export const getTaskMessages = async (
       });
       
       console.log("✅ Created new chat");
-      return res.status(200).json({ success: true, messages: [] });
+      return res.status(200).json({ 
+        success: true, 
+        messages: [],
+        pagination: {
+          currentPage: 1,
+          totalPages: 0,
+          totalMessages: 0,
+          hasMore: false,
+          limit: 20,
+        }
+      });
     }
 
-    // ✅ Manually populate parentMessage for each message
-    const populatedMessages = (chat.messages || []).map((msg: any) => {
+    const totalMessages = chat.messages?.length || 0;
+    const totalPages = Math.ceil(totalMessages / limit);
+    
+    // ✅ KEEP NATURAL ORDER (oldest first)
+    // Get messages in their natural order (oldest to newest)
+    const allMessages = chat.messages || [];
+    
+    // For page 1, get the LATEST messages (last 20)
+    // For page 2, get the previous 20, etc.
+    let paginatedMessages;
+    if (page === 1) {
+      // Most recent messages (last N messages)
+      paginatedMessages = allMessages.slice(Math.max(0, totalMessages - limit));
+    } else {
+      // Older messages - work backwards from the most recent page
+      const endIndex = totalMessages - ((page - 1) * limit);
+      const startIndex = Math.max(0, endIndex - limit);
+      paginatedMessages = allMessages.slice(startIndex, endIndex);
+    }
+
+    // Manually populate parentMessage for each message
+    const populatedMessages = paginatedMessages.map((msg: any) => {
       if (msg.parentMessage) {
-        // Find parent message in the same messages array
-        const parentMsg = chat!.messages.find(
+        const parentMsg = allMessages.find(
           (m: any) => m._id.toString() === msg.parentMessage.toString()
         );
         
         if (parentMsg) {
           return {
-            ...msg.toObject(), // Convert to plain object if needed
+            ...msg.toObject(),
             parentMessage: {
               _id: parentMsg._id,
-              sender: parentMsg.sender, // Already populated from above
+              sender: parentMsg.sender,
               content: parentMsg.content,
               createdAt: parentMsg.createdAt
             }
@@ -475,8 +517,19 @@ export const getTaskMessages = async (
       return msg.toObject ? msg.toObject() : msg;
     });
 
-    console.log(`✅ Returning ${populatedMessages.length} messages`);
-    return res.status(200).json({ success: true, messages: populatedMessages });
+    console.log(`✅ Returning ${populatedMessages.length}/${totalMessages} messages (Page ${page}/${totalPages})`);
+    
+    return res.status(200).json({ 
+      success: true, 
+      messages: populatedMessages,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalMessages,
+        hasMore: page < totalPages,
+        limit,
+      }
+    });
 
   } catch (error) {
     console.error("🔥 ERROR GETTING TASK MESSAGES:", error);
@@ -486,7 +539,6 @@ export const getTaskMessages = async (
     });
   }
 };
-
 // =============================
 // ADD TASK MESSAGE - WITH REPLY SUPPORT & MENTIONS
 // =============================
@@ -682,15 +734,16 @@ export const addTaskMessage = async (
 
           if (io) {
             const notificationPayload = {
-              _id: notification._id,
-              type: notification.type,
-              message: notification.message,
-              task: notification.task,
-              status: notification.status,
-              isRead: notification.isRead,
-              createdAt: notification.createdAt,
-              user: notification.user
-            };
+  _id: notification._id,
+  type: notification.type,
+  message: notification.message,
+  task: notification.task,
+  taskId: taskId,  // ← ADD THIS LINE
+  status: notification.status,
+  isRead: notification.isRead,
+  createdAt: notification.createdAt,
+  user: notification.user
+};
 
             const recipientUserId = mentionedUser._id.toString();
             console.log("📡 [SOCKET] Emitting to room:", recipientUserId);

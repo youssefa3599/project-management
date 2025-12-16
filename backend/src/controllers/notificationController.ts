@@ -37,7 +37,7 @@ export const createNotification = async (req: RequestWithUser, res: Response) =>
       taskId: taskId || task || undefined,
       project: project || undefined,
       status: "pending",
-      isRead: false, // ✅ CRITICAL: Explicitly set to false
+      isRead: false,
     });
 
     await notification.save();
@@ -45,7 +45,6 @@ export const createNotification = async (req: RequestWithUser, res: Response) =>
     console.log("   → isRead:", notification.isRead);
     console.log("   → status:", notification.status);
 
-    // ✅ Get Socket.IO instance safely
     const io = (req as any).app?.get?.("io");
     
     console.log("📡 [SOCKET EMISSION] Attempting to emit to user:", userId);
@@ -58,13 +57,12 @@ export const createNotification = async (req: RequestWithUser, res: Response) =>
       });
     }
 
+    // ✅ FIX: Ensure consistent string format for socket rooms
     const userIdString = userId.toString();
     
-    // ✅ Emit to the specific user's room
     try {
       console.log(`📤 [SOCKET] Emitting to room: "${userIdString}"`);
       
-      // Emit the notification with all necessary fields
       const notificationPayload = {
         _id: notification._id,
         user: notification.user,
@@ -80,9 +78,7 @@ export const createNotification = async (req: RequestWithUser, res: Response) =>
       
       io.to(userIdString).emit("newNotification", notificationPayload);
       console.log("✅ [SOCKET EMIT] newNotification emitted successfully!");
-      console.log("   → Payload:", JSON.stringify(notificationPayload, null, 2));
       
-      // Also verify the room exists
       const socketsInRoom = await io.in(userIdString).fetchSockets();
       console.log(`   → Sockets in room "${userIdString}": ${socketsInRoom.length}`);
       
@@ -140,13 +136,11 @@ export const markNotificationAsRead = async (req: RequestWithUser, res: Response
     if (notification.user.toString() !== req.user.id)
       return res.status(403).json({ message: "Forbidden: You can only mark your own notifications as read" });
 
-    // Only update if not already read
     if (!notification.isRead) {
       notification.isRead = true;
       await notification.save();
       console.log(`✅ [MARK AS READ] Notification ${id} marked as read`);
 
-      // ✅ Get Socket.IO instance safely
       const io = (req as any).app?.get?.("io");
       if (io) {
         const notificationPayload = {
@@ -162,8 +156,14 @@ export const markNotificationAsRead = async (req: RequestWithUser, res: Response
           createdAt: notification.createdAt,
         };
         
-        console.log(`📤 [SOCKET] Emitting notificationUpdated to user ${req.user.id}`);
-        io.to(req.user.id).emit("notificationUpdated", notificationPayload);
+        // ✅ FIX: Convert to string for consistent socket rooms
+        const userIdString = req.user.id.toString();
+        console.log(`📤 [SOCKET] Emitting notificationUpdated to room: "${userIdString}"`);
+        io.to(userIdString).emit("notificationUpdated", notificationPayload);
+        
+        // 🐛 DEBUG: Check if socket is in room
+        const socketsInRoom = await io.in(userIdString).fetchSockets();
+        console.log(`   → Sockets in room "${userIdString}": ${socketsInRoom.length}`);
       }
     } else {
       console.log(`ℹ️ [MARK AS READ] Notification ${id} already read`);
@@ -189,7 +189,6 @@ export const markAllNotificationsAsRead = async (req: RequestWithUser, res: Resp
 
     const userId = req.user.id;
 
-    // Find all unread notifications
     const unreadNotifications = await Notification.find({
       user: userId,
       isRead: false,
@@ -206,7 +205,6 @@ export const markAllNotificationsAsRead = async (req: RequestWithUser, res: Resp
       });
     }
 
-    // Bulk update all to isRead: true
     const result = await Notification.updateMany(
       { user: userId, isRead: false },
       { $set: { isRead: true } }
@@ -214,14 +212,18 @@ export const markAllNotificationsAsRead = async (req: RequestWithUser, res: Resp
 
     console.log(`✅ [MARK ALL] Marked ${result.modifiedCount} notifications as read`);
 
-    // ✅ Get Socket.IO instance safely
     const io = (req as any).app?.get?.("io");
     if (io) {
-      // Emit event to user that all notifications are read
-      io.to(userId).emit("notificationsMarkedRead", {
+      // ✅ FIX: Convert to string for consistent socket rooms
+      const userIdString = userId.toString();
+      console.log(`📤 [SOCKET] Emitting notificationsMarkedRead to room: "${userIdString}"`);
+      io.to(userIdString).emit("notificationsMarkedRead", {
         count: unreadCount,
       });
-      console.log("📡 [SOCKET] Emitted notificationsMarkedRead event");
+      
+      // 🐛 DEBUG: Check if socket is in room
+      const socketsInRoom = await io.in(userIdString).fetchSockets();
+      console.log(`   → Sockets in room "${userIdString}": ${socketsInRoom.length}`);
     }
 
     res.status(200).json({
@@ -253,10 +255,11 @@ export const deleteNotification = async (req: RequestWithUser, res: Response) =>
 
     await Notification.findByIdAndDelete(notification._id);
 
-    // ✅ Get Socket.IO instance safely
     const io = (req as any).app?.get?.("io");
     if (io) {
-      io.to(req.user.id).emit("notificationDeleted", { notificationId: id });
+      // ✅ FIX: Convert to string for consistent socket rooms
+      const userIdString = req.user.id.toString();
+      io.to(userIdString).emit("notificationDeleted", { notificationId: id });
     }
 
     res.status(200).json({ message: "Notification deleted successfully" });
@@ -268,7 +271,6 @@ export const deleteNotification = async (req: RequestWithUser, res: Response) =>
 
 /* =========================
    🎯 Respond to Notification (Accept/Decline)
-   ✅ FIXED: Only adds to TASK.MEMBERS, NOT project.members
    ========================= */
 export const respondToNotification = async (req: RequestWithUser, res: Response) => {
   console.log("====================================");
@@ -307,14 +309,11 @@ export const respondToNotification = async (req: RequestWithUser, res: Response)
     }
 
     notification.status = response === "accept" ? "accepted" : "declined";
-    notification.isRead = true; // ✅ Mark as read when responding
+    notification.isRead = true;
 
-    /* ------------------------------------------------
-     * ✅ ACCEPT: taskChatInvite → add to TASK.MEMBERS + CHAT only
-     * ❌ REMOVED: No longer adds to project.members
-     * ------------------------------------------------ */
     let fullTask: any = null;
     let fullProject: any = null;
+    let chat: any = null;
 
     if (response === "accept" && notification.type === "taskChatInvite") {
       const taskId =
@@ -331,7 +330,6 @@ export const respondToNotification = async (req: RequestWithUser, res: Response)
 
         const userObjectId = new mongoose.Types.ObjectId(req.user.id);
 
-        // ✅ 1. Add user to TASK.MEMBERS (isolated task access)
         const isTaskMember = task.members.some(
           (m: mongoose.Types.ObjectId) => m.toString() === req.user!.id
         );
@@ -339,17 +337,13 @@ export const respondToNotification = async (req: RequestWithUser, res: Response)
         if (!isTaskMember) {
           task.members.push(userObjectId);
           await task.save();
-          console.log("✅ [DEBUG] User added to task.members (isolated access)");
+          console.log("✅ [DEBUG] User added to task.members");
         } else {
           console.log("ℹ️ [DEBUG] User already a task member");
         }
 
-        // ❌ REMOVED: NO LONGER ADDING TO PROJECT.MEMBERS
-        // User will only see this project because they're a task member
-        console.log("⚠️ [DEBUG] NOT adding user to project.members (task-only access)");
-
-        // ✅ 2. Add user to chat
-        let chat = await Chat.findOne({ taskId: task._id });
+        chat = await Chat.findOne({ taskId: task._id });
+        
         if (chat) {
           const isChatMember = chat.members.some(
             (m: any) => m.toString() === req.user!.id.toString()
@@ -358,9 +352,8 @@ export const respondToNotification = async (req: RequestWithUser, res: Response)
           if (!isChatMember) {
             chat.members.push(userObjectId);
             await chat.save();
-            console.log("✅ [DEBUG] User added to chat");
+            console.log("✅ [DEBUG] User added to chat:", chat._id);
 
-            // ✅ Get Socket.IO instance safely
             const io = (req as any).app?.get?.("io");
             if (io) {
               io.to((chat._id as mongoose.Types.ObjectId).toString()).emit("memberJoinedTaskChat", {
@@ -382,7 +375,6 @@ export const respondToNotification = async (req: RequestWithUser, res: Response)
           console.log("✅ [DEBUG] New chat created:", chat._id);
         }
 
-        // ✅ Fetch project info (for display purposes, NOT membership)
         const projectId =
           typeof task.project === "object" && task.project && "_id" in task.project
             ? (task.project as any)._id
@@ -402,7 +394,6 @@ export const respondToNotification = async (req: RequestWithUser, res: Response)
     await notification.save();
     console.log("💾 [DEBUG] Notification saved:", notification._id);
 
-    // ✅ Get Socket.IO instance safely and emit complete data
     const io = (req as any).app?.get?.("io");
     
     if (io) {
@@ -417,11 +408,18 @@ export const respondToNotification = async (req: RequestWithUser, res: Response)
         task: fullTask || notification.task,
         user: notification.user,
         createdAt: notification.createdAt,
-        isRead: notification.isRead
+        isRead: notification.isRead,
+        chatId: chat?._id
       };
 
-      console.log("📡 [SOCKET] Emitting notificationUpdated with full data");
-      io.to(notification.user.toString()).emit("notificationUpdated", socketPayload);
+      // ✅ FIX: Convert to string for consistent socket rooms
+      const userIdString = notification.user.toString();
+      console.log(`📡 [SOCKET] Emitting notificationUpdated to room: "${userIdString}"`);
+      io.to(userIdString).emit("notificationUpdated", socketPayload);
+      
+      // 🐛 DEBUG: Check if socket is in room
+      const socketsInRoom = await io.in(userIdString).fetchSockets();
+      console.log(`   → Sockets in room "${userIdString}": ${socketsInRoom.length}`);
     }
 
     await logActivity({
@@ -430,7 +428,7 @@ export const respondToNotification = async (req: RequestWithUser, res: Response)
       entityType: 'notification',
       entityId: notification._id.toString(),
       description: `User responded to notification`,
-      details: `User responded '${response}' to notification (task-only access).`,
+      details: `User responded '${response}' to notification.`,
     });
 
     const responsePayload: any = {
@@ -444,10 +442,12 @@ export const respondToNotification = async (req: RequestWithUser, res: Response)
         taskId: fullTask?._id || notification.task
       },
       project: fullProject,
-      task: fullTask
+      task: fullTask,
+      chat: chat ? { _id: chat._id } : null,
+      chatId: chat?._id?.toString()
     };
 
-    console.log("✅ [RESPONSE] Sending response with project and task data");
+    console.log("✅ [RESPONSE] Sending response with chatId:", chat?._id);
     res.status(200).json(responsePayload);
   } catch (error: any) {
     console.error("❌ [DEBUG] Error responding to notification:", error);

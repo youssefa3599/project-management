@@ -19,13 +19,25 @@ export interface IMessage {
   status?: 'sending' | 'sent' | 'failed';
 }
 
+interface PaginatedResponse {
+  success: boolean;
+  messages: IMessage[];
+  pagination: {
+    currentPage: number;
+    totalPages: number;
+    totalMessages: number;
+    hasMore: boolean;
+    limit: number;
+  };
+}
+
 interface AddMessageVariables {
   content: string;
   parentMessageId?: string | null;
 }
 
 interface AddMessageContext {
-  previousMessages?: IMessage[];
+  previousData?: any;
 }
 
 export default function useAddTaskMessage(
@@ -37,7 +49,6 @@ export default function useAddTaskMessage(
   const API_URL = import.meta.env.VITE_API_URL;
 
   return useMutation<IMessage, Error, AddMessageVariables, AddMessageContext>({
-    // 1. The actual API call
     mutationFn: async ({ content, parentMessageId }) => {
       const response = await axios.post(
         `${API_URL}/api/tasks/${taskId}/chat`,
@@ -47,21 +58,24 @@ export default function useAddTaskMessage(
       return response.data;
     },
 
-    // 2. OPTIMISTIC UPDATE - runs immediately before API call
+    // ✅ OPTIMISTIC UPDATE for paginated data
     onMutate: async ({ content, parentMessageId }) => {
-      // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
+      console.log("🚀 [Mutation] onMutate - Adding optimistic message");
+      
       await queryClient.cancelQueries({ queryKey: ['messages', taskId] });
 
-      // Snapshot the previous value
-      const previousMessages = queryClient.getQueryData<IMessage[]>(['messages', taskId]);
+      const previousData = queryClient.getQueryData(['messages', taskId]);
+      
+      console.log(`📦 [Mutation] Current pages: ${(previousData as any)?.pages?.length || 0}`);
 
       // Find parent message if replying
       let parentMessage: IMessage | null = null;
-      if (parentMessageId && previousMessages) {
-        parentMessage = previousMessages.find(m => m._id === parentMessageId) || null;
+      if (parentMessageId && previousData) {
+        const allMessages = (previousData as any).pages?.flatMap((page: PaginatedResponse) => page.messages) || [];
+        parentMessage = allMessages.find((m: IMessage) => m._id === parentMessageId) || null;
       }
 
-      // Create optimistic message
+      // Create optimistic message with unique ID
       const optimisticMessage: IMessage = {
         _id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         content,
@@ -75,51 +89,78 @@ export default function useAddTaskMessage(
         parentMessage,
         status: 'sending',
       };
+      
+      console.log(`➕ [Mutation] Created temp message: ${optimisticMessage._id}`);
 
-      // Optimistically update the cache
-      if (previousMessages) {
-        queryClient.setQueryData<IMessage[]>(
-          ['messages', taskId],
-          [...previousMessages, optimisticMessage]
-        );
+      // ✅ Update paginated cache - add to FIRST page (page 1 = newest)
+      if (previousData) {
+        queryClient.setQueryData(['messages', taskId], (oldData: any) => {
+          if (!oldData?.pages || !Array.isArray(oldData.pages) || oldData.pages.length === 0) {
+            console.log("📄 [Mutation] No pages exist, creating first page");
+            return {
+              pages: [{
+                success: true,
+                messages: [optimisticMessage],
+                pagination: {
+                  currentPage: 1,
+                  totalPages: 1,
+                  totalMessages: 1,
+                  hasMore: false,
+                  limit: 20,
+                },
+              }],
+              pageParams: [1],
+            };
+          }
+
+          const newPages = [...oldData.pages];
+          const firstPage = { ...newPages[0] }; // Page 1 = newest messages
+          
+          console.log(`📄 [Mutation] Adding to first page (currently has ${firstPage.messages?.length || 0} messages)`);
+          
+          // Add to first page
+          firstPage.messages = [...(firstPage.messages || []), optimisticMessage];
+          firstPage.pagination = {
+            ...firstPage.pagination,
+            totalMessages: (firstPage.pagination?.totalMessages || 0) + 1,
+          };
+          
+          newPages[0] = firstPage;
+          
+          console.log(`✅ [Mutation] First page now has ${newPages[0].messages.length} messages`);
+
+          return {
+            ...oldData,
+            pages: newPages,
+          };
+        });
       }
 
-      // Return context with previous state for rollback
-      return { previousMessages };
+      return { previousData };
     },
 
-    // 3. ROLLBACK - if mutation fails
+    // ✅ ROLLBACK on error
     onError: (err, variables, context) => {
       console.error('❌ Failed to send message:', err);
       
-      // Rollback to previous state
-      if (context?.previousMessages) {
-        queryClient.setQueryData(['messages', taskId], context.previousMessages);
+      if (context?.previousData) {
+        queryClient.setQueryData(['messages', taskId], context.previousData);
       }
     },
 
-    // 4. SUCCESS - replace temp message with real one
+    // ✅ SUCCESS - replace temp message with real one
     onSuccess: (newMessage, variables, context) => {
-      console.log('✅ Message sent successfully');
+      console.log('✅ [Mutation] onSuccess - Message sent successfully');
+      console.log(`   Real message ID: ${newMessage._id}`);
+      console.log('   ℹ️ Socket has already replaced temp message, no action needed');
       
-      // Replace temp message with real message from server
-      const previousMessages = queryClient.getQueryData<IMessage[]>(['messages', taskId]);
-      
-      if (previousMessages) {
-        const updatedMessages = previousMessages.map(msg =>
-          msg._id.startsWith('temp-') && msg.content === newMessage.content
-            ? { ...newMessage, status: 'sent' as const }
-            : msg
-        );
-        
-        queryClient.setQueryData(['messages', taskId], updatedMessages);
-      }
+      // DO NOT INVALIDATE - the socket handler already updated the cache
+      // Invalidating would cause a refetch that might not include the new message yet
     },
 
-    // 5. CLEANUP - always runs after success or error
+    // ✅ CLEANUP
     onSettled: () => {
-      // Refetch to ensure we're in sync with server
-      queryClient.invalidateQueries({ queryKey: ['messages', taskId] });
+      // Already invalidated in onSuccess
     },
   });
 }

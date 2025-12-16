@@ -1,257 +1,399 @@
+/* NotificationPage.css */
+
 .notification-page {
-  padding: 24px;
-  max-width: 720px;
+  max-width: 900px;
   margin: 0 auto;
-  background: #fafafa;
-  min-height: 100vh;
+  padding: 20px;
 }
 
 .notification-page h2 {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+  color: #212529;
+  font-size: 28px;
   font-weight: 600;
-  color: #1d1d1f;
-  font-size: 1.5rem;
-  text-align: center;
 }
 
-.loading,
-.empty-state {
+/* Loading State */
+.loading {
   text-align: center;
-  color: #777;
-  font-size: 1rem;
-  margin-top: 50px;
+  padding: 40px;
+  color: #6c757d;
+  font-size: 16px;
 }
 
-/* === Card Layout === */
+/* Notification Cards Container */
 .notification-cards {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
+/* Individual Notification Card */
 .notification-card {
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
-  padding: 18px 22px;
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
   border-left: 4px solid transparent;
-  transition: all 0.25s ease;
   position: relative;
 }
 
 .notification-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
 }
 
-/* Unread notifications get blue accent */
+/* Unread notification styling */
 .notification-card.unread {
-  border-left-color: #4b0082;
-  background: #f8f5ff;
+  border-left-color: #007bff;
+  background: #f8f9ff;
 }
 
-/* Pending → subtle highlight */
-.notification-card.pending {
-  border-left-color: #2196f3;
-}
-
-/* Accepted → green accent */
-.notification-card.accepted {
-  border-left-color: #4caf50;
-  background: #f3faf4;
-}
-
-/* Declined → red accent */
-.notification-card.declined {
-  border-left-color: #f44336;
-  background: #fff7f7;
-}
-
-/* Read notifications are slightly faded */
 .notification-card.read {
-  opacity: 0.75;
+  border-left-color: #e9ecef;
 }
 
-/* === Card Sections === */
+/* Status-based card styling */
+.notification-card.accepted {
+  border-left-color: #28a745;
+}
+
+.notification-card.declined {
+  border-left-color: #dc3545;
+}
+
+/* Card Header */
 .card-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+  gap: 12px;
 }
 
 .card-header h4 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 16px;
   font-weight: 600;
-  color: #222;
+  color: #212529;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .notification-icon {
-  font-size: 1.2rem;
+  font-size: 20px;
 }
 
 .card-time {
-  font-size: 0.85rem;
-  color: #888;
+  font-size: 13px;
+  color: #6c757d;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color 0.2s;
 }
 
+.card-time:hover {
+  color: #495057;
+}
+
+/* Card Body */
 .card-body {
-  font-size: 0.95rem;
-  color: #333;
-  margin: 8px 0 14px;
+  margin-bottom: 16px;
 }
 
+.card-body p {
+  margin: 0;
+  color: #495057;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Card Footer */
 .card-footer {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
   flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e9ecef;
 }
 
-/* === Actions === */
+/* Action Buttons Container */
 .invite-actions,
 .mention-actions {
   display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
 }
 
+/* Button Styles */
 .btn-accept,
 .btn-decline,
-.btn-view-chat,
-.btn-mark-read {
+.btn-view-chat {
+  padding: 8px 16px;
   border: none;
-  padding: 8px 14px;
   border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.2s ease, transform 0.1s ease;
+  font-size: 14px;
   font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .btn-accept {
-  background-color: #4caf50;
-  color: #fff;
+  background: #28a745;
+  color: white;
 }
 
 .btn-accept:hover:not(:disabled) {
-  background-color: #43a047;
-  transform: scale(1.03);
+  background: #218838;
+  transform: translateY(-1px);
 }
 
 .btn-decline {
-  background-color: #f44336;
-  color: #fff;
+  background: #dc3545;
+  color: white;
 }
 
 .btn-decline:hover:not(:disabled) {
-  background-color: #e53935;
-  transform: scale(1.03);
+  background: #c82333;
+  transform: translateY(-1px);
 }
 
 .btn-view-chat {
-  background-color: #4b0082;
-  color: #fff;
+  background: #007bff;
+  color: white;
 }
 
-.btn-view-chat:hover {
-  background-color: #3a0066;
-  transform: scale(1.03);
-}
-
-.btn-mark-read {
-  background-color: #2196f3;
-  color: #fff;
-}
-
-.btn-mark-read:hover {
-  background-color: #1976d2;
-  transform: scale(1.03);
+.btn-view-chat:hover:not(:disabled) {
+  background: #0056b3;
+  transform: translateY(-1px);
 }
 
 .btn-accept:disabled,
-.btn-decline:disabled {
-  opacity: 0.5;
+.btn-decline:disabled,
+.btn-view-chat:disabled {
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
-/* === Status Badges === */
+/* Status Badges */
 .status-badge {
-  display: inline-block;
-  padding: 5px 10px;
-  border-radius: 6px;
-  font-size: 0.85rem;
+  padding: 6px 12px;
+  border-radius: 12px;
+  font-size: 12px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .status-badge.accepted {
-  background-color: #e8f5e9;
-  color: #2e7d32;
+  background: #d4edda;
+  color: #155724;
 }
 
 .status-badge.declined {
-  background-color: #ffebee;
-  color: #c62828;
+  background: #f8d7da;
+  color: #721c24;
 }
 
-.status-badge.read {
-  background-color: #e3f2fd;
-  color: #1565c0;
+.status-badge.pending {
+  background: #fff3cd;
+  color: #856404;
 }
 
-/* Unread indicator dot */
-.unread-indicator {
-  color: #ef4444;
-  font-size: 1.5rem;
-  line-height: 1;
-  margin-left: auto;
+/* Unread Dot Indicator */
+.unread-dot {
+  width: 10px;
+  height: 10px;
+  background: #007bff;
+  border-radius: 50%;
   animation: pulse 2s infinite;
+  margin-left: auto;
 }
 
 @keyframes pulse {
   0%, 100% {
     opacity: 1;
+    transform: scale(1);
   }
   50% {
-    opacity: 0.5;
+    opacity: 0.6;
+    transform: scale(1.1);
   }
 }
 
-/* === Smooth Fade Animation === */
-.notification-card {
-  opacity: 0;
-  animation: fadeIn 0.4s ease forwards;
+/* Notification Stats */
+.notification-stats {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 12px 20px;
+  margin-bottom: 20px;
+  border-left: 4px solid #007bff;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.notification-stats p {
+  margin: 0;
+  font-size: 14px;
+  color: #495057;
 }
 
-/* Responsive */
+.notification-stats strong {
+  color: #212529;
+  font-weight: 600;
+}
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #6c757d;
+}
+
+.empty-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+  opacity: 0.5;
+}
+
+.empty-state h3 {
+  font-size: 24px;
+  margin-bottom: 10px;
+  color: #495057;
+}
+
+.empty-state p {
+  font-size: 16px;
+  color: #6c757d;
+}
+
+/* Notification Metadata */
+.notification-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e9ecef;
+}
+
+.metadata-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #e9ecef;
+  color: #495057;
+}
+
+.metadata-badge.type-badge {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.metadata-badge.task-badge {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.metadata-badge.status-badge-small {
+  text-transform: capitalize;
+}
+
+.metadata-badge.status-badge-small.pending {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.metadata-badge.status-badge-small.accepted {
+  background: #d4edda;
+  color: #155724;
+}
+
+.metadata-badge.status-badge-small.declined {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+/* Card Timestamp */
+.card-timestamp {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #dee2e6;
+}
+
+.card-timestamp small {
+  color: #6c757d;
+  font-size: 11px;
+}
+
+/* Status Badges Container */
+.status-badges {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Unread Indicator */
+.unread-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #007bff;
+  color: white;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.unread-indicator .unread-dot {
+  width: 8px;
+  height: 8px;
+  background: white;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.unread-text {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Responsive Design */
 @media (max-width: 768px) {
   .notification-page {
     padding: 16px;
   }
 
+  .notification-page h2 {
+    font-size: 24px;
+  }
+
   .notification-card {
-    padding: 14px 16px;
+    padding: 16px;
   }
 
   .card-header {
     flex-direction: column;
     align-items: flex-start;
-    gap: 4px;
+  }
+
+  .card-time {
+    font-size: 12px;
+  }
+
+  .card-footer {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .invite-actions,
@@ -261,9 +403,41 @@
 
   .btn-accept,
   .btn-decline,
-  .btn-view-chat,
-  .btn-mark-read {
+  .btn-view-chat {
     flex: 1;
-    min-width: 80px;
+    justify-content: center;
+  }
+
+  .notification-metadata {
+    flex-direction: column;
+  }
+  
+  .metadata-badge {
+    width: fit-content;
+  }
+}
+
+@media (max-width: 480px) {
+  .notification-page {
+    padding: 12px;
+  }
+
+  .notification-cards {
+    gap: 12px;
+  }
+
+  .notification-card {
+    padding: 12px;
+  }
+
+  .card-body p {
+    font-size: 13px;
+  }
+
+  .btn-accept,
+  .btn-decline,
+  .btn-view-chat {
+    padding: 6px 12px;
+    font-size: 13px;
   }
 }
